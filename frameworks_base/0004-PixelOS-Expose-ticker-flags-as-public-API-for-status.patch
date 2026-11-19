@@ -1,0 +1,77 @@
+From 1b24fc627e8c014a0784a6326b2c2dea99d9adff Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?=E6=9E=97=E5=87=8C=E5=84=BF?=
+ <32541118+linlinger@users.noreply.github.com>
+Date: Mon, 16 Nov 2026 23:14:15 +0800
+Subject: [PATCH 4/4] PixelOS: Expose ticker flags as public API for statusbar
+ lyric detection
+
+Android 17 hidden API enforcement classifies the custom
+Notification.FLAG_ALWAYS_SHOW_TICKER / FLAG_ONLY_UPDATE_TICKER fields
+as blocked, so music apps reflection (NetEase Cloud Music 9.6.22,
+QQ Music 20.9.8.8 - mf0/b clinit / RemoteLyricController) fails with
+NoSuchFieldException and their statusbar lyric option never shows up.
+
+Remove the @hide annotation and add both fields to core/api/current.txt
+so they land in the SDK API surface and hiddenapi assigns them the
+whitelisted flag. Verified on device: the reflection denial was the
+last blocker - the Meizu Build spoof already passed z3.U().
+
+Note: Evolution-X cnb does not do this (checked core/api/current.txt
+at 2026-11-16); its ticker mode is likely affected the same way,
+consistent with their switch to LRCLIB-based lyrics.
+
+Change-Id: I2bff878ebbd62ffa709b559032758948af4374d5
+---
+ core/api/current.txt                    |  2 ++
+ core/java/android/app/Notification.java | 10 ++++++++--
+ 2 files changed, 10 insertions(+), 2 deletions(-)
+
+diff --git a/core/api/current.txt b/core/api/current.txt
+index 572012ca4643..c42c1940330a 100644
+--- a/core/api/current.txt
++++ b/core/api/current.txt
+@@ -6774,6 +6774,7 @@ package android.app {
+     field public static final String EXTRA_TITLE_BIG = "android.title.big";
+     field public static final String EXTRA_VERIFICATION_ICON = "android.verificationIcon";
+     field public static final String EXTRA_VERIFICATION_TEXT = "android.verificationText";
++    field public static final int FLAG_ALWAYS_SHOW_TICKER = 16777216; // 0x1000000
+     field public static final int FLAG_AUTO_CANCEL = 16; // 0x10
+     field public static final int FLAG_BUBBLE = 4096; // 0x1000
+     field public static final int FLAG_FOREGROUND_SERVICE = 64; // 0x40
+@@ -6784,6 +6785,7 @@ package android.app {
+     field public static final int FLAG_NO_CLEAR = 32; // 0x20
+     field public static final int FLAG_ONGOING_EVENT = 2; // 0x2
+     field public static final int FLAG_ONLY_ALERT_ONCE = 8; // 0x8
++    field public static final int FLAG_ONLY_UPDATE_TICKER = 33554432; // 0x2000000
+     field public static final int FLAG_PROMOTED_ONGOING = 262144; // 0x40000
+     field @Deprecated public static final int FLAG_SHOW_LIGHTS = 1; // 0x1
+     field public static final int FOREGROUND_SERVICE_DEFAULT = 0; // 0x0
+diff --git a/core/java/android/app/Notification.java b/core/java/android/app/Notification.java
+index bb0388f72317..139453d5d7a2 100644
+--- a/core/java/android/app/Notification.java
++++ b/core/java/android/app/Notification.java
+@@ -760,13 +760,19 @@ public class Notification implements Parcelable
+     public static final int FLAG_USER_INITIATED_JOB = 0x00008000;
+ 
+     /**
+-     * @hide
++     * Flag to make the ticker text persist until explicitly replaced or cancelled.
++     * Used by music apps to publish statusbar lyrics. Exposed as public API so that
++     * apps can reflect it despite hidden API enforcement.
+      */
++    @SuppressLint("UnflaggedApi")
+     public static final int FLAG_ALWAYS_SHOW_TICKER = 0x01000000;
+ 
+     /**
+-     * @hide
++     * Flag to make the ticker text update without re-posting the notification.
++     * Used by music apps to publish statusbar lyrics. Exposed as public API so that
++     * apps can reflect it despite hidden API enforcement.
+      */
++    @SuppressLint("UnflaggedApi")
+     public static final int FLAG_ONLY_UPDATE_TICKER = 0x02000000;
+ 
+     /**
+-- 
+2.56.1
+

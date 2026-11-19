@@ -1,0 +1,195 @@
+From f6e4e0f00009e5f3628317df5222aa9e079d961e Mon Sep 17 00:00:00 2001
+From: cjybyjk <cjybyjk@zjnu.edu.cn>
+Date: Mon, 20 Jan 2025 04:34:30 +0000
+Subject: [PATCH 3/4] PixelOS: Disguise props for music apps for status bar
+ lyric
+
+Some music apps (NetEase Cloud Music, QQ Music, KuGou, Kuwo, Migu and
+Honor Music) only publish the statusbar-lyric ticker notifications when
+they believe they run on a supported ROM. Disguise those apps as a
+Meizu device (Flyme) at Application instantiation time, enabled by
+default via persist.sys.disguise_props_for_music_app (default true);
+users can opt out with:
+  adb shell setprop persist.sys.disguise_props_for_music_app false
+
+Device values verified against app-side detection (2026-11, smali):
+- NetEase Cloud Music 9.6.22: Build.DISPLAY.toLowerCase().startsWith
+  ("flyme") || Build.BRAND.toLowerCase()=="meizu" (z3.S/z3.U), plus
+  reflection of Notification.FLAG_ALWAYS_SHOW_TICKER /
+  FLAG_ONLY_UPDATE_TICKER. DEVICE is not checked.
+- QQ Music 20.9.8.8: same ticker flag reflection plus
+  RemoteLyricController$a.d(): Build.DEVICE must NOT be "Note9" or
+  "M1852" (Meizu models where QQ disables the feature) - hence
+  DEVICE=m1892 (Meizu 16th Plus codename), which passes both apps.
+
+Port of the Pixel Experience patch from linlinger ginkgo tree
+(patches/framework-base/0003-base-Reset-props-for-status-bar-lyric),
+hooked at both newApplication() paths, like evox cnb GamePropsSpoofService wiring.
+
+Change-Id: I2f22d70b18d969ceaed177382d28bc9a35d4d2e1
+---
+ core/java/android/app/Instrumentation.java    | 18 +++-
+ .../internal/util/custom/MeizuPropsUtils.java | 93 +++++++++++++++++++
+ 2 files changed, 107 insertions(+), 4 deletions(-)
+ create mode 100644 core/java/com/android/internal/util/custom/MeizuPropsUtils.java
+
+diff --git a/core/java/android/app/Instrumentation.java b/core/java/android/app/Instrumentation.java
+index e6fa3b8205c2..2baf0c44a180 100644
+--- a/core/java/android/app/Instrumentation.java
++++ b/core/java/android/app/Instrumentation.java
+@@ -80,6 +80,7 @@ import java.util.Objects;
+ import java.util.StringJoiner;
+ import java.util.concurrent.TimeoutException;
+ 
++import com.android.internal.util.custom.MeizuPropsUtils;
+ import com.android.internal.util.custom.PixelPropsUtils;
+ 
+ /**
+@@ -118,6 +119,9 @@ public class Instrumentation {
+ 
+     private static final boolean VERBOSE = Log.isLoggable(TAG, Log.VERBOSE);
+ 
++    private static final String DISGUISE_PROPS_FOR_MUSIC_APP =
++            "persist.sys.disguise_props_for_music_app";
++
+     /**
+      * If set, will print the stack trace for activity starts within the process
+      * @hide
+@@ -1364,25 +1368,31 @@ public class Instrumentation {
+                 .instantiateApplication(cl, className);
+         app.attach(context);
+         PixelPropsUtils.setProps(context);
++        if (SystemProperties.getBoolean(DISGUISE_PROPS_FOR_MUSIC_APP, true)) {
++            MeizuPropsUtils.setProps(context.getPackageName());
++        }
+         return app;
+     }
+-    
++
+     /**
+      * Perform instantiation of the process's {@link Application} object.  The
+      * default implementation provides the normal system behavior.
+-     * 
++     *
+      * @param clazz The class used to create an Application object from.
+      * @param context The context to initialize the application with
+-     * 
++     *
+      * @return The newly instantiated Application object.
+      */
+     @RavenwoodKeep
+     static public Application newApplication(Class<?> clazz, Context context)
+-            throws InstantiationException, IllegalAccessException, 
++            throws InstantiationException, IllegalAccessException,
+             ClassNotFoundException {
+         Application app = (Application)clazz.newInstance();
+         app.attach(context);
+         PixelPropsUtils.setProps(context);
++        if (SystemProperties.getBoolean(DISGUISE_PROPS_FOR_MUSIC_APP, true)) {
++            MeizuPropsUtils.setProps(context.getPackageName());
++        }
+         return app;
+     }
+ 
+diff --git a/core/java/com/android/internal/util/custom/MeizuPropsUtils.java b/core/java/com/android/internal/util/custom/MeizuPropsUtils.java
+new file mode 100644
+index 000000000000..3461c5c1ae51
+--- /dev/null
++++ b/core/java/com/android/internal/util/custom/MeizuPropsUtils.java
+@@ -0,0 +1,93 @@
++/*
++ * Copyright (C) 2020 The Pixel Experience Project
++ *               2020 The exTHmUI Open Source Project
++ *               2022 Project Kaleidoscope
++ *               2026 The PixelOS Project
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ *      http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++package com.android.internal.util.custom;
++
++import android.os.Build;
++import android.util.Log;
++
++import java.util.Arrays;
++import java.lang.reflect.Field;
++import java.util.HashMap;
++import java.util.Map;
++
++/**
++ * Disguises the device as a Meizu device for a fixed list of music apps,
++ * so they publish the statusbar-lyric ticker notifications consumed by
++ * SystemUI's status bar lyric feature.
++ *
++ * Gated by the system property persist.sys.disguise_props_for_music_app.
++ */
++public class MeizuPropsUtils {
++
++    private static final String TAG = MeizuPropsUtils.class.getSimpleName();
++    private static final boolean DEBUG = false;
++
++    private static final Map<String, Object> propsToChange;
++
++    private static final String[] packagesToChange = {
++        "com.hihonor.cloudmusic",
++        "com.netease.cloudmusic",
++        "com.tencent.qqmusic",
++        "com.kugou.android",
++        "com.kugou.android.lite",
++        "cmccwm.mobilemusic",
++        "cn.kuwo.player",
++        "com.meizu.media.music"
++    };
++
++    static {
++        propsToChange = new HashMap<>();
++        propsToChange.put("BRAND", "meizu");
++        propsToChange.put("MANUFACTURER", "Meizu");
++        propsToChange.put("DEVICE", "m1892");
++        propsToChange.put("DISPLAY", "Flyme");
++        propsToChange.put("PRODUCT", "meizu_16thPlus_CN");
++        propsToChange.put("MODEL", "meizu 16th Plus");
++    }
++
++    public static void setProps(String packageName) {
++        if (packageName == null) {
++            return;
++        }
++        if (Arrays.asList(packagesToChange).contains(packageName)) {
++            if (DEBUG) {
++                Log.d(TAG, "Defining props for: " + packageName);
++            }
++            for (Map.Entry<String, Object> prop : propsToChange.entrySet()) {
++                String key = prop.getKey();
++                Object value = prop.getValue();
++                setPropValue(key, value);
++            }
++        }
++    }
++
++    private static void setPropValue(String key, Object value) {
++        try {
++            if (DEBUG) {
++                Log.d(TAG, "Defining prop " + key + " to " + value.toString());
++            }
++            Field field = Build.class.getDeclaredField(key);
++            field.setAccessible(true);
++            field.set(null, value);
++            field.setAccessible(false);
++        } catch (NoSuchFieldException | IllegalAccessException e) {
++            Log.e(TAG, "Failed to set prop " + key, e);
++        }
++    }
++}
+-- 
+2.56.1
+

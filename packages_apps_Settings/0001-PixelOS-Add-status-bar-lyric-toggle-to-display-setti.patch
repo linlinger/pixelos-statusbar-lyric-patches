@@ -1,0 +1,145 @@
+From 9822ddb624a743b815a4fe751dd2494064e0ebda Mon Sep 17 00:00:00 2001
+From: Kujou Yuko <i@779.moe>
+Date: Mon, 20 Jan 2025 04:32:26 +0000
+Subject: [PATCH] PixelOS: Add status bar lyric toggle to display settings
+
+Adds a switch in Display -> Other display controls that toggles
+Settings.Secure.STATUS_BAR_SHOW_LYRIC, consumed by the SystemUI
+status bar lyric feature (ported from Evolution-X cnb).
+
+Counterpart of Evolution-X Evolver commit 2d2e69a788b5 'Evolver: Add
+status bar lyric [2/2]', adapted to stock AOSP Settings with the
+standard PreferenceController pattern.
+
+Change-Id: I5984d66b17e652a5a26350e1b4673a334820a862
+---
+ res/values/custom_strings.xml                 |  4 ++
+ res/xml/display_settings.xml                  |  5 ++
+ src/com/android/settings/DisplaySettings.java |  2 +
+ .../StatusBarLyricPreferenceController.java   | 65 +++++++++++++++++++
+ 4 files changed, 76 insertions(+)
+ create mode 100644 src/com/android/settings/display/StatusBarLyricPreferenceController.java
+
+diff --git a/res/values/custom_strings.xml b/res/values/custom_strings.xml
+index 982a87f60f4..6b0b84d577c 100644
+--- a/res/values/custom_strings.xml
++++ b/res/values/custom_strings.xml
+@@ -492,4 +492,8 @@
+     <string name="spoof_show_system">Show system apps</string>
+     <string name="spoof_filter">Filter</string>
+     <string name="spoof_no_apps">No matching apps</string>
++
++    <!-- Status bar lyric -->
++    <string name="status_bar_lyric_title">Status bar lyrics</string>
++    <string name="status_bar_lyric_summary">Show music lyrics in the status bar (requires a supporting music app)</string>
+ </resources>
+diff --git a/res/xml/display_settings.xml b/res/xml/display_settings.xml
+index 51da40ddd7c..8972bf76b5e 100644
+--- a/res/xml/display_settings.xml
++++ b/res/xml/display_settings.xml
+@@ -169,6 +169,11 @@
+             settings:keywords="@string/keywords_auto_rotate"
+             settings:controller="com.android.settings.display.SmartAutoRotatePreferenceController"/>
+ 
++        <SwitchPreference
++            android:key="status_bar_show_lyric"
++            android:title="@string/status_bar_lyric_title"
++            android:summary="@string/status_bar_lyric_summary"/>
++
+         <!--
+             Auto-rotation preference that will be shown when device state based auto-rotation
+             settings are available.
+diff --git a/src/com/android/settings/DisplaySettings.java b/src/com/android/settings/DisplaySettings.java
+index 16add096c09..ffb5473dd70 100644
+--- a/src/com/android/settings/DisplaySettings.java
++++ b/src/com/android/settings/DisplaySettings.java
+@@ -31,6 +31,7 @@ import com.android.settings.display.DisplayScreen;
+ import com.android.settings.display.ExternalDisplayPreferenceController;
+ import com.android.settings.display.LiftToWakePreferenceController;
+ import com.android.settings.display.ShowOperatorNamePreferenceController;
++import com.android.settings.display.StatusBarLyricPreferenceController;
+ import com.android.settings.display.TapToWakePreferenceController;
+ import com.android.settings.display.ThemePreferenceController;
+ import com.android.settings.display.VrDisplayPreferenceController;
+@@ -94,6 +95,7 @@ public class DisplaySettings extends DashboardFragment {
+         controllers.add(new TapToWakePreferenceController(context));
+         controllers.add(new VrDisplayPreferenceController(context));
+         controllers.add(new ShowOperatorNamePreferenceController(context));
++        controllers.add(new StatusBarLyricPreferenceController(context));
+         controllers.add(new ThemePreferenceController(context));
+         controllers.add(new BrightnessLevelPreferenceController(context, lifecycle));
+ 
+diff --git a/src/com/android/settings/display/StatusBarLyricPreferenceController.java b/src/com/android/settings/display/StatusBarLyricPreferenceController.java
+new file mode 100644
+index 00000000000..3fbf1360eec
+--- /dev/null
++++ b/src/com/android/settings/display/StatusBarLyricPreferenceController.java
+@@ -0,0 +1,65 @@
++/*
++ * Copyright (C) 2026 The PixelOS Project
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ *      http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++package com.android.settings.display;
++
++import android.content.Context;
++import android.provider.Settings;
++
++import androidx.preference.Preference;
++import androidx.preference.PreferenceScreen;
++import androidx.preference.TwoStatePreference;
++
++import com.android.settings.core.BasePreferenceController;
++import com.android.settings.core.PreferenceControllerMixin;
++
++/**
++ * A controller to manage the switch for showing music lyrics in the status
++ * bar, backed by {@link Settings.Secure#STATUS_BAR_SHOW_LYRIC}.
++ *
++ * The SystemUI side reads this setting via a ContentObserver and renders the
++ * lyric ticker published by supporting music apps.
++ */
++public class StatusBarLyricPreferenceController extends BasePreferenceController
++        implements PreferenceControllerMixin, Preference.OnPreferenceChangeListener {
++
++    public StatusBarLyricPreferenceController(Context context, String preferenceKey) {
++        super(context, preferenceKey);
++    }
++
++    public StatusBarLyricPreferenceController(Context context) {
++        super(context, Settings.Secure.STATUS_BAR_SHOW_LYRIC);
++    }
++
++    @Override
++    public int getAvailabilityStatus() {
++        return AVAILABLE;
++    }
++
++    @Override
++    public void updateState(Preference preference) {
++        int setting = Settings.Secure.getInt(mContext.getContentResolver(),
++                Settings.Secure.STATUS_BAR_SHOW_LYRIC, 0);
++        ((TwoStatePreference) preference).setChecked(setting != 0);
++    }
++
++    @Override
++    public boolean onPreferenceChange(Preference preference, Object newValue) {
++        boolean enabled = (Boolean) newValue;
++        Settings.Secure.putInt(mContext.getContentResolver(),
++                Settings.Secure.STATUS_BAR_SHOW_LYRIC, enabled ? 1 : 0);
++        return true;
++    }
++}
+-- 
+2.56.1
+

@@ -1,0 +1,889 @@
+From c1dbaa5dc5d3901e4c95c2212c1584c9d9be6ccd Mon Sep 17 00:00:00 2001
+From: cjybyjk <cjybyjk@zjnu.edu.cn>
+Date: Fri, 29 Jul 2022 09:12:24 +0000
+Subject: [PATCH 1/4] PixelOS: Add status bar lyric
+
+Port of Evolution-X commit b53bc2c6acc0 '[SQUASHED] base: Add status bar
+lyric for Android 17' (branch cnb) to PixelOS.
+
+Adaptations for PixelOS:
+- HomeStatusBarViewBinder: no batteryBar/leftLogo/centered_area, and
+  HomeStatusBarViewModel has no hideStartSideContentForHeadsUp flow, so
+  the HUN hide condition is dropped (always false).
+- evolution_dimens.xml / evolution_styles.xml replaced by new
+  lyric_dimens.xml / lyric_styles.xml (evox-only files don't exist here).
+- Settings key uses @Readable annotation (included in squash).
+
+Based on Project Kaleidoscope status bar lyric, exTHmUI, Flyme behavior.
+Original authors: KujouYuko, joeyhuab, LynnrinChan, AmeChanRain, Nift4,
+NurKeinNeid, Arman-ATI and others.
+
+Change-Id: Ifecbe5c3ec18a2d98074eb75a0e55fccad794937
+---
+ core/java/android/app/Notification.java       |  10 +
+ core/java/android/provider/Settings.java      |  12 +
+ packages/SystemUI/res/layout/status_bar.xml   |   2 +
+ .../SystemUI/res/layout/status_bar_lyric.xml  |  55 +++++
+ packages/SystemUI/res/values/lyric_dimens.xml |  22 ++
+ packages/SystemUI/res/values/lyric_styles.xml |  23 ++
+ .../src/com/android/systemui/Dependency.java  |   3 +
+ .../systemui/statusbar/StatusBarIconView.java |   2 +-
+ .../collection/NotifCollection.java           |   4 +
+ .../statusbar/phone/LyricControllerModern.kt  | 109 +++++++++
+ .../statusbar/phone/LyricViewController.kt    | 217 ++++++++++++++++++
+ .../fragment/StatusBarVisibilityModel.kt      |   4 +
+ .../ui/binder/HomeStatusBarViewBinder.kt      |  80 ++++++-
+ .../android/systemui/util/LyricTextView.kt    | 134 +++++++++++
+ 14 files changed, 674 insertions(+), 3 deletions(-)
+ create mode 100644 packages/SystemUI/res/layout/status_bar_lyric.xml
+ create mode 100644 packages/SystemUI/res/values/lyric_dimens.xml
+ create mode 100644 packages/SystemUI/res/values/lyric_styles.xml
+ create mode 100644 packages/SystemUI/src/com/android/systemui/statusbar/phone/LyricControllerModern.kt
+ create mode 100644 packages/SystemUI/src/com/android/systemui/statusbar/phone/LyricViewController.kt
+ create mode 100644 packages/SystemUI/src/com/android/systemui/util/LyricTextView.kt
+
+diff --git a/core/java/android/app/Notification.java b/core/java/android/app/Notification.java
+index 47d61adc2b3c..bb0388f72317 100644
+--- a/core/java/android/app/Notification.java
++++ b/core/java/android/app/Notification.java
+@@ -759,6 +759,16 @@ public class Notification implements Parcelable
+     @TestApi
+     public static final int FLAG_USER_INITIATED_JOB = 0x00008000;
+ 
++    /**
++     * @hide
++     */
++    public static final int FLAG_ALWAYS_SHOW_TICKER = 0x01000000;
++
++    /**
++     * @hide
++     */
++    public static final int FLAG_ONLY_UPDATE_TICKER = 0x02000000;
++
+     /**
+      * Bit to be bitwise-ORed into the {@link #flags} field that should be
+      * set if this notification has been lifetime extended due to a direct reply.
+diff --git a/core/java/android/provider/Settings.java b/core/java/android/provider/Settings.java
+index 6c064757f282..59f666eb3185 100644
+--- a/core/java/android/provider/Settings.java
++++ b/core/java/android/provider/Settings.java
+@@ -14681,6 +14681,18 @@ public final class Settings {
+          * @hide
+          */
+         public static final String SPOOF_TRICKYSTORE_PATCH = "spoof_trickystore_patch";
++        
++        /**
++         * Show lyric in status bar when playing music
++         * <ul>
++         *    <li> 0 = disabled </li>
++         *    <li> 1 = enabled </li>
++         * </ul>
++         *
++         * @hide
++         */
++        @Readable
++        public static final String STATUS_BAR_SHOW_LYRIC = "status_bar_show_lyric";
+     }
+ 
+     /**
+diff --git a/packages/SystemUI/res/layout/status_bar.xml b/packages/SystemUI/res/layout/status_bar.xml
+index 9f7a6d756741..d19e8c5d8e15 100644
+--- a/packages/SystemUI/res/layout/status_bar.xml
++++ b/packages/SystemUI/res/layout/status_bar.xml
+@@ -72,6 +72,8 @@
+                 android:layout_gravity="center_vertical|start"
+                 android:clipChildren="false">
+ 
++                <include layout="@layout/status_bar_lyric" />
++
+                 <!-- The alpha of the start side is controlled by PhoneStatusBarTransitions, and the
+                      individual views are controlled by StatusBarManager disable flags DISABLE_CLOCK
+                      and DISABLE_NOTIFICATION_ICONS, respectively -->
+diff --git a/packages/SystemUI/res/layout/status_bar_lyric.xml b/packages/SystemUI/res/layout/status_bar_lyric.xml
+new file mode 100644
+index 000000000000..1b6bc7ba19bb
+--- /dev/null
++++ b/packages/SystemUI/res/layout/status_bar_lyric.xml
+@@ -0,0 +1,55 @@
++<?xml version="1.0" encoding="utf-8"?>
++<!--
++  - Copyright 2020 The exTHmUI Open Source Project
++  -           2022 Project Kaleidoscope
++  -
++  - Licensed under the Apache License, Version 2.0 (the "License");
++  - you may not use this file except in compliance with the License.
++  - You may obtain a copy of the License at
++  -
++  -     http://www.apache.org/licenses/LICENSE-2.0
++  -
++  - Unless required by applicable law or agreed to in writing, software
++  - distributed under the License is distributed on an "AS IS" BASIS,
++  - WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++  - See the License for the specific language governing permissions and
++  - limitations under the License.
++  -->
++<LinearLayout
++    xmlns:android="http://schemas.android.com/apk/res/android"
++    android:id="@+id/lyric_container"
++    android:layout_width="match_parent"
++    android:layout_height="match_parent"
++    android:gravity="center_vertical"
++    android:visibility="gone"
++    android:orientation="horizontal"
++    android:paddingEnd="@dimen/lyric_padding_end">
++
++    <ImageSwitcher android:id="@+id/lyric_icon"
++        android:layout_width="@dimen/status_bar_icon_size"
++        android:layout_height="@dimen/status_bar_icon_size"
++        android:layout_marginEnd="@dimen/lyric_icon_margin_end">
++        <ImageView
++            android:layout_width="@dimen/status_bar_icon_size"
++            android:layout_height="@dimen/status_bar_icon_size"
++            android:scaleType="centerInside" />
++        <ImageView
++            android:layout_width="@dimen/status_bar_icon_size"
++            android:layout_height="@dimen/status_bar_icon_size"
++            android:scaleType="centerInside" />
++    </ImageSwitcher>
++    <TextSwitcher android:id="@+id/lyric_text"
++        android:layout_width="match_parent"
++        android:layout_height="wrap_content">
++        <com.android.systemui.util.LyricTextView
++            android:textAppearance="@style/TextApperance.StatusBar.Lyric"
++            android:layout_width="match_parent"
++            android:layout_height="wrap_content"
++            android:maxLines="1" />
++        <com.android.systemui.util.LyricTextView
++            android:textAppearance="@style/TextApperance.StatusBar.Lyric"
++            android:layout_width="match_parent"
++            android:layout_height="wrap_content"
++            android:maxLines="1" />
++    </TextSwitcher>
++</LinearLayout>
+\ No newline at end of file
+diff --git a/packages/SystemUI/res/values/lyric_dimens.xml b/packages/SystemUI/res/values/lyric_dimens.xml
+new file mode 100644
+index 000000000000..bb00a6b6daa6
+--- /dev/null
++++ b/packages/SystemUI/res/values/lyric_dimens.xml
+@@ -0,0 +1,22 @@
++<?xml version="1.0" encoding="utf-8"?>
++<!--
++  Copyright (C) 2022 Project Kaleidoscope
++               2026 PixelOS port of status bar lyric
++
++  Licensed under the Apache License, Version 2.0 (the "License");
++  you may not use this file except in compliance with the License.
++  You may obtain a copy of the License at
++
++      http://www.apache.org/licenses/LICENSE-2.0
++
++  Unless required by applicable law or agreed to in writing, software
++  distributed under the License is distributed on an "AS IS" BASIS,
++  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++  See the License for the specific language governing permissions and
++  limitations under the License.
++-->
++<resources>
++    <!-- Lyric -->
++    <dimen name="lyric_icon_margin_end">4dp</dimen>
++    <dimen name="lyric_padding_end">4dp</dimen>
++</resources>
+diff --git a/packages/SystemUI/res/values/lyric_styles.xml b/packages/SystemUI/res/values/lyric_styles.xml
+new file mode 100644
+index 000000000000..a783f0141e76
+--- /dev/null
++++ b/packages/SystemUI/res/values/lyric_styles.xml
+@@ -0,0 +1,23 @@
++<?xml version="1.0" encoding="utf-8"?>
++<!--
++  Copyright (C) 2022 Project Kaleidoscope
++               2026 PixelOS port of status bar lyric
++
++  Licensed under the Apache License, Version 2.0 (the "License");
++  you may not use this file except in compliance with the License.
++  You may obtain a copy of the License at
++
++      http://www.apache.org/licenses/LICENSE-2.0
++
++  Unless required by applicable law or agreed to in writing, software
++  distributed under the License is distributed on an "AS IS" BASIS,
++  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++  See the License for the specific language governing permissions and
++  limitations under the License.
++-->
++<resources>
++    <style name="TextApperance.StatusBar.Lyric" parent="@*android:style/TextAppearance.StatusBar">
++        <item name="android:textSize">14sp</item>
++        <item name="android:fontFamily">@*android:string/config_bodyFontFamily</item>
++    </style>
++</resources>
+diff --git a/packages/SystemUI/src/com/android/systemui/Dependency.java b/packages/SystemUI/src/com/android/systemui/Dependency.java
+index ba6894dd76b3..efd0140e1c74 100644
+--- a/packages/SystemUI/src/com/android/systemui/Dependency.java
++++ b/packages/SystemUI/src/com/android/systemui/Dependency.java
+@@ -45,6 +45,7 @@ import com.android.systemui.settings.UserTracker;
+ import com.android.systemui.shared.plugins.PackageConfig;
+ import com.android.systemui.statusbar.CommandQueue;
+ import com.android.systemui.statusbar.lockscreen.LockscreenSmartspaceController;
++import com.android.systemui.statusbar.NotificationListener;
+ import com.android.systemui.statusbar.notification.collection.render.GroupExpansionManager;
+ import com.android.systemui.statusbar.notification.collection.render.GroupMembershipManager;
+ import com.android.systemui.statusbar.notification.stack.AmbientState;
+@@ -137,6 +138,7 @@ public class Dependency {
+     @Inject Lazy<NavigationBarController> mNavigationBarController;
+     @Inject Lazy<StatusBarStateController> mStatusBarStateController;
+     @Inject Lazy<NotificationMediaManager> mNotificationMediaManager;
++    @Inject Lazy<NotificationListener> mNotificationListener;
+     @Inject @Background Lazy<Looper> mBgLooper;
+     @Inject @Named(TIME_TICK_HANDLER_NAME) Lazy<Handler> mTimeTickHandler;
+     @Inject Lazy<SysUiState> mSysUiStateFlagsContainer;
+@@ -186,6 +188,7 @@ public class Dependency {
+         mProviders.put(NavigationBarController.class, mNavigationBarController::get);
+         mProviders.put(StatusBarStateController.class, mStatusBarStateController::get);
+         mProviders.put(NotificationMediaManager.class, mNotificationMediaManager::get);
++        mProviders.put(NotificationListener.class, mNotificationListener::get);
+         mProviders.put(SysUiState.class, mSysUiStateFlagsContainer::get);
+         mProviders.put(CommandQueue.class, mCommandQueue::get);
+         mProviders.put(UiEventLogger.class, mUiEventLogger::get);
+diff --git a/packages/SystemUI/src/com/android/systemui/statusbar/StatusBarIconView.java b/packages/SystemUI/src/com/android/systemui/statusbar/StatusBarIconView.java
+index cbf26cf75422..5de827c8ae00 100644
+--- a/packages/SystemUI/src/com/android/systemui/statusbar/StatusBarIconView.java
++++ b/packages/SystemUI/src/com/android/systemui/statusbar/StatusBarIconView.java
+@@ -482,7 +482,7 @@ public class StatusBarIconView extends AnimatedImageView implements StatusIconDi
+      * @return Drawable for this item, or null if the package or item could not
+      *         be found
+      */
+-    private Drawable getIcon(Context sysuiContext,
++    public Drawable getIcon(Context sysuiContext,
+             Context context, StatusBarIcon statusBarIcon) {
+         Drawable icon = loadDrawable(context, statusBarIcon);
+ 
+diff --git a/packages/SystemUI/src/com/android/systemui/statusbar/notification/collection/NotifCollection.java b/packages/SystemUI/src/com/android/systemui/statusbar/notification/collection/NotifCollection.java
+index 1a440191ec29..65ab8bd75e05 100644
+--- a/packages/SystemUI/src/com/android/systemui/statusbar/notification/collection/NotifCollection.java
++++ b/packages/SystemUI/src/com/android/systemui/statusbar/notification/collection/NotifCollection.java
+@@ -585,6 +585,10 @@ public class NotifCollection implements Dumpable, PipelineDumpable {
+ 
+             mLogger.logNotifUpdated(entry);
+             mEventQueue.add(new EntryUpdatedEvent(entry, source));
++            // update ticker only, LyricController will handle it
++            if ((entry.getSbn().getNotification().flags & Notification.FLAG_ONLY_UPDATE_TICKER) != 0) {
++                return;
++            }
+         }
+     }
+ 
+diff --git a/packages/SystemUI/src/com/android/systemui/statusbar/phone/LyricControllerModern.kt b/packages/SystemUI/src/com/android/systemui/statusbar/phone/LyricControllerModern.kt
+new file mode 100644
+index 000000000000..9fb6593dc309
+--- /dev/null
++++ b/packages/SystemUI/src/com/android/systemui/statusbar/phone/LyricControllerModern.kt
+@@ -0,0 +1,109 @@
++/*
++ * SPDX-FileCopyrightText: DerpFest AOSP
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++package com.android.systemui.statusbar.phone
++
++import android.content.Context
++import android.database.ContentObserver
++import android.os.Handler
++import android.os.Looper
++import android.os.UserHandle
++import android.provider.Settings
++import android.view.View
++
++/**
++ * Standalone lyric controller for modern status bar pipeline.
++ * Manages lyric display independently without requiring CollapsedStatusBarFragment.
++ */
++class LyricControllerModern(
++    private val context: Context,
++    private val lyricContainer: View,
++    private val leftSideView: View?,
++    private val centeredAreaView: View?,
++) : LyricViewController(context, lyricContainer.rootView) {
++
++    private var settingsObserver: ContentObserver? = null
++    private var isNotificationIconsVisible = true
++    private var hideForHun = false
++    private var hasOngoingActivity = false
++
++    override fun showLyricView(animate: Boolean) {
++        // Only show if all conditions are met
++        if (!isNotificationIconsVisible || hideForHun || hasOngoingActivity || !isLyricStarted()) {
++            hideLyricView(animate)
++            return
++        }
++        lyricContainer.visibility = View.VISIBLE
++        // Hide left side and centered area when showing lyrics
++        leftSideView?.visibility = View.GONE
++        centeredAreaView?.visibility = View.GONE
++    }
++
++    override fun hideLyricView(animate: Boolean) {
++        lyricContainer.visibility = View.GONE
++        // Restore left side and centered area visibility when hiding lyrics
++        // These views are managed by the view model, but we need to show them
++        // when lyrics are hidden to restore the normal status bar layout
++        leftSideView?.visibility = View.VISIBLE
++        centeredAreaView?.visibility = View.VISIBLE
++    }
++
++    fun attach() {
++        if (settingsObserver != null) {
++            return
++        }
++
++        settingsObserver = object : ContentObserver(Handler(Looper.getMainLooper())) {
++            override fun onChange(selfChange: Boolean) {
++                val enabled = Settings.Secure.getIntForUser(
++                    context.contentResolver,
++                    Settings.Secure.STATUS_BAR_SHOW_LYRIC,
++                    0,
++                    UserHandle.USER_CURRENT
++                ) != 0
++                setEnabled(enabled)
++            }
++        }
++
++        context.contentResolver.registerContentObserver(
++            Settings.Secure.getUriFor(Settings.Secure.STATUS_BAR_SHOW_LYRIC),
++            false,
++            settingsObserver!!,
++            UserHandle.USER_ALL
++        )
++
++        // Initialize enabled state
++        val enabled = Settings.Secure.getIntForUser(
++            context.contentResolver,
++            Settings.Secure.STATUS_BAR_SHOW_LYRIC,
++            0,
++            UserHandle.USER_CURRENT
++        ) != 0
++        setEnabled(enabled)
++    }
++
++    fun detach() {
++        settingsObserver?.let {
++            context.contentResolver.unregisterContentObserver(it)
++            settingsObserver = null
++        }
++    }
++
++    fun updateVisibility(
++        isNotificationIconsVisible: Boolean,
++        hideForHun: Boolean,
++        hasOngoingActivity: Boolean
++    ) {
++        this.isNotificationIconsVisible = isNotificationIconsVisible
++        this.hideForHun = hideForHun
++        this.hasOngoingActivity = hasOngoingActivity
++
++        if (isLyricStarted()) {
++            showLyricView(true)
++        } else {
++            hideLyricView(true)
++        }
++    }
++}
+diff --git a/packages/SystemUI/src/com/android/systemui/statusbar/phone/LyricViewController.kt b/packages/SystemUI/src/com/android/systemui/statusbar/phone/LyricViewController.kt
+new file mode 100644
+index 000000000000..eab3aa327238
+--- /dev/null
++++ b/packages/SystemUI/src/com/android/systemui/statusbar/phone/LyricViewController.kt
+@@ -0,0 +1,217 @@
++/*
++ * Copyright (C) 2022 Project Kaleidoscope
++ * Copyright (C) 2025-2026 RisingOS (revived) Android Project
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ *      http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++
++package com.android.systemui.statusbar.phone
++
++import android.app.Notification
++import android.content.Context
++import android.content.res.ColorStateList
++import android.graphics.Rect
++import android.graphics.drawable.Drawable
++import android.service.notification.NotificationListenerService.RankingMap
++import android.service.notification.StatusBarNotification
++import android.text.TextUtils
++import android.view.MotionEvent
++import android.view.View
++import android.view.animation.AnimationUtils
++import android.widget.ImageSwitcher
++import android.widget.ImageView
++import android.widget.TextSwitcher
++import android.widget.TextView
++import com.android.internal.statusbar.StatusBarIcon
++import com.android.internal.util.ContrastColorUtil
++import com.android.systemui.Dependency
++import com.android.systemui.plugins.DarkIconDispatcher
++import com.android.systemui.res.R
++import com.android.systemui.statusbar.NotificationListener
++import com.android.systemui.statusbar.StatusBarIconView
++
++abstract class LyricViewController(
++    private val context: Context,
++    statusBar: View,
++) : DarkIconDispatcher.DarkReceiver, NotificationListener.NotificationHandler {
++
++    private val iconSwitcher: ImageSwitcher = statusBar.findViewById(R.id.lyric_icon)
++    private val textSwitcher: TextSwitcher = statusBar.findViewById(R.id.lyric_text)
++    private val lyricContainer: View = statusBar.findViewById(R.id.lyric_container)
++
++    private val notificationColorUtil: ContrastColorUtil = ContrastColorUtil.getInstance(context)
++
++    private var enabled = false
++    private var started = false
++
++    private var currentNotificationPackage: String? = null
++    private var currentNotificationId = 0
++
++    private var tintColorStateList: ColorStateList? = null
++
++    init {
++        val animationIn = AnimationUtils.loadAnimation(context, com.android.internal.R.anim.push_up_in)
++        val animationOut = AnimationUtils.loadAnimation(context, com.android.internal.R.anim.push_up_out)
++
++        textSwitcher.inAnimation = animationIn
++        textSwitcher.outAnimation = animationOut
++        iconSwitcher.inAnimation = animationIn
++        iconSwitcher.outAnimation = animationOut
++
++        lyricContainer.setOnTouchListener { v, event ->
++            if (event.action == MotionEvent.ACTION_DOWN) {
++                hideLyricView(true)
++                v.postDelayed({ showLyricView(true) }, HIDE_LYRIC_DELAY.toLong())
++            }
++            false
++        }
++
++        Dependency.get(DarkIconDispatcher::class.java).addDarkReceiver(this)
++        Dependency.get(NotificationListener::class.java).addNotificationHandler(this)
++    }
++
++    fun setEnabled(enabled: Boolean) {
++        this.enabled = enabled
++        if (!this.enabled && started) {
++            stopLyric()
++        }
++    }
++
++    fun isEnabled(): Boolean = enabled
++
++    override fun onNotificationPosted(sbn: StatusBarNotification, rankingMap: RankingMap) {
++        if (!enabled) return
++
++        val notification = sbn.notification
++        val isLyric = (notification.flags and Notification.FLAG_ALWAYS_SHOW_TICKER) != 0
++
++        val isCurrentNotification = currentNotificationId == sbn.id &&
++            TextUtils.equals(sbn.packageName, currentNotificationPackage)
++
++        if (!isLyric) {
++            if (isCurrentNotification) {
++                stopLyric()
++            }
++        } else {
++            currentNotificationPackage = sbn.packageName
++            currentNotificationId = sbn.id
++
++            if (notification.tickerText == null) {
++                stopLyric()
++                return
++            }
++            if (!isCurrentNotification || !started ||
++                notification.extras.getBoolean(EXTRA_TICKER_ICON_SWITCH, false)
++            ) {
++                val iconId = notification.extras.getInt(EXTRA_TICKER_ICON, -1)
++                val slot = "${sbn.packageName}/0x${Integer.toHexString(sbn.id)}"
++                val statusBarIconView = StatusBarIconView(context, slot, sbn)
++                val icon: Drawable? = if (iconId == -1) {
++                    notification.getSmallIcon().loadDrawable(context)
++                } else {
++                    statusBarIconView.getIcon(
++                        context,
++                        sbn.getPackageContext(context),
++                        StatusBarIcon(
++                            sbn.packageName,
++                            sbn.user,
++                            iconId,
++                            notification.iconLevel,
++                            0,
++                            null,
++                            StatusBarIcon.Type.NotifSmallIcon,
++                        ),
++                    )
++                }
++                iconSwitcher.setImageDrawable(icon)
++                updateIconTint()
++            }
++            startLyric()
++            textSwitcher.setText(notification.tickerText)
++        }
++    }
++
++    override fun onNotificationRemoved(sbn: StatusBarNotification, rankingMap: RankingMap) {
++        val isCurrentNotification = currentNotificationId == sbn.id &&
++            TextUtils.equals(sbn.packageName, currentNotificationPackage)
++        if (isCurrentNotification) {
++            stopLyric()
++        }
++    }
++
++    override fun onNotificationRemoved(
++        sbn: StatusBarNotification,
++        rankingMap: RankingMap,
++        reason: Int,
++    ) {
++        onNotificationRemoved(sbn, rankingMap)
++    }
++
++    override fun onNotificationRankingUpdate(rankingMap: RankingMap) {}
++
++    override fun onNotificationsInitialized() {}
++
++    fun startLyric() {
++        if (!started) {
++            started = true
++            showLyricView(true)
++        }
++    }
++
++    fun stopLyric() {
++        if (started) {
++            started = false
++            hideLyricView(true)
++            currentNotificationPackage = null
++            currentNotificationId = 0
++        }
++    }
++
++    abstract fun showLyricView(animate: Boolean)
++
++    abstract fun hideLyricView(animate: Boolean)
++
++    fun isLyricStarted(): Boolean = started
++
++    val view: View
++        get() = lyricContainer
++
++    private fun updateIconTint() {
++        val drawable = (iconSwitcher.currentView as ImageView).drawable
++        val isGrayscale = notificationColorUtil.isGrayscaleIcon(drawable)
++        if (isGrayscale) {
++            (iconSwitcher.currentView as ImageView).imageTintList = tintColorStateList
++            (iconSwitcher.nextView as ImageView).imageTintList = tintColorStateList
++        } else {
++            (iconSwitcher.currentView as ImageView).imageTintList = null
++            (iconSwitcher.nextView as ImageView).imageTintList = null
++        }
++    }
++
++    override fun onDarkChanged(area: ArrayList<Rect>?, darkIntensity: Float, tint: Int) {
++        val tintColor = DarkIconDispatcher.getTint(area ?: ArrayList(), lyricContainer, tint)
++
++        (textSwitcher.currentView as TextView).setTextColor(tintColor)
++        (textSwitcher.nextView as TextView).setTextColor(tintColor)
++
++        tintColorStateList = ColorStateList.valueOf(tintColor)
++        updateIconTint()
++    }
++
++    companion object {
++        private const val EXTRA_TICKER_ICON = "ticker_icon"
++        private const val EXTRA_TICKER_ICON_SWITCH = "ticker_icon_switch"
++
++        private const val HIDE_LYRIC_DELAY = 1200
++    }
++}
+diff --git a/packages/SystemUI/src/com/android/systemui/statusbar/phone/fragment/StatusBarVisibilityModel.kt b/packages/SystemUI/src/com/android/systemui/statusbar/phone/fragment/StatusBarVisibilityModel.kt
+index 132ede523a82..36c38d17e1a3 100644
+--- a/packages/SystemUI/src/com/android/systemui/statusbar/phone/fragment/StatusBarVisibilityModel.kt
++++ b/packages/SystemUI/src/com/android/systemui/statusbar/phone/fragment/StatusBarVisibilityModel.kt
+@@ -35,6 +35,10 @@ data class StatusBarVisibilityModel(
+             this.showSecondaryOngoingActivityChip != other.showSecondaryOngoingActivityChip
+     }
+ 
++    fun getShowOngoingActivityChip(): Boolean {
++        return showPrimaryOngoingActivityChip || showSecondaryOngoingActivityChip
++    }
++
+     companion object {
+         /** Creates the default model. */
+         @JvmStatic
+diff --git a/packages/SystemUI/src/com/android/systemui/statusbar/pipeline/shared/ui/binder/HomeStatusBarViewBinder.kt b/packages/SystemUI/src/com/android/systemui/statusbar/pipeline/shared/ui/binder/HomeStatusBarViewBinder.kt
+index 64e096d660d3..49ffa48fbe96 100644
+--- a/packages/SystemUI/src/com/android/systemui/statusbar/pipeline/shared/ui/binder/HomeStatusBarViewBinder.kt
++++ b/packages/SystemUI/src/com/android/systemui/statusbar/pipeline/shared/ui/binder/HomeStatusBarViewBinder.kt
+@@ -18,6 +18,12 @@ package com.android.systemui.statusbar.pipeline.shared.ui.binder
+ 
+ import android.animation.Animator
+ import android.animation.AnimatorListenerAdapter
++import android.database.ContentObserver
++import android.net.Uri
++import android.os.Handler
++import android.os.Looper
++import android.os.UserHandle
++import android.provider.Settings
+ import android.view.View
+ import androidx.core.view.isVisible
+ import androidx.lifecycle.Lifecycle
+@@ -33,9 +39,11 @@ import com.android.systemui.statusbar.events.shared.model.SystemEventAnimationSt
+ import com.android.systemui.statusbar.events.shared.model.SystemEventAnimationState.AnimatingIn
+ import com.android.systemui.statusbar.events.shared.model.SystemEventAnimationState.AnimatingOut
+ import com.android.systemui.statusbar.events.shared.model.SystemEventAnimationState.RunningChipAnim
++import com.android.systemui.statusbar.phone.LyricViewController
+ import com.android.systemui.statusbar.pipeline.shared.ui.model.VisibilityModel
+ import com.android.systemui.statusbar.pipeline.shared.ui.viewmodel.HomeStatusBarViewModel
+ import javax.inject.Inject
++import kotlinx.coroutines.Job
+ import kotlinx.coroutines.launch
+ 
+ /**
+@@ -81,8 +89,44 @@ class HomeStatusBarViewBinderImpl @Inject constructor() : HomeStatusBarViewBinde
+         clockView.hideInitially()
+         notificationIconsArea.hideInitially()
+ 
++        val leftSideArea: View =
++            view.requireViewById(R.id.status_bar_start_side_except_heads_up)
++        val lyricView =
++            object : LyricViewController(view.context, view) {
++                private var isNotificationIconsVisible = true
++
++                override fun showLyricView(animate: Boolean) {
++                    if (!isNotificationIconsVisible) {
++                        hideLyricView(animate)
++                        return
++                    }
++                    leftSideArea.hide(View.INVISIBLE, animate)
++                    this.view.show(animate)
++                }
++
++                override fun hideLyricView(animate: Boolean) {
++                    this.view.hide(View.INVISIBLE, animate)
++                    // Only restore these views if nothing else needs them hidden right now.
++                    // Otherwise we'd fight the HUN or chip logic for the same region.
++                    if (isNotificationIconsVisible) {
++                        leftSideArea.show(animate)
++                    }
++                }
++
++                fun updateConditions(isNotificationIconsVisible: Boolean) {
++                    this.isNotificationIconsVisible = isNotificationIconsVisible
++                    if (isLyricStarted()) {
++                        showLyricView(true)
++                    } else {
++                        hideLyricView(true)
++                    }
++                }
++            }
++        lyricView.view.hideInitially()
++
+         view.repeatWhenAttached {
+             repeatOnLifecycle(Lifecycle.State.CREATED) {
++                val context = view.context
+                 listener?.let { listener ->
+                     launch {
+                         viewModel.isTransitioningFromLockscreenToOccluded.collect {
+@@ -146,8 +190,40 @@ class HomeStatusBarViewBinderImpl @Inject constructor() : HomeStatusBarViewBinde
+                 }
+ 
+                 launch {
+-                    viewModel.isNotificationIconContainerVisible.collect {
+-                        notificationIconsArea.adjustVisibility(it)
++                    viewModel.isNotificationIconContainerVisible.collect { vis ->
++                        notificationIconsArea.adjustVisibility(vis)
++                        lyricView.updateConditions(
++                            isNotificationIconsVisible = vis.visibility == View.VISIBLE,
++                        )
++                    }
++                }
++
++                val lyricEnabledUri: Uri =
++                    Settings.Secure.getUriFor(Settings.Secure.STATUS_BAR_SHOW_LYRIC)
++                val lyricContentObserver =
++                    object : ContentObserver(Handler(Looper.getMainLooper())) {
++                        override fun onChange(selfChange: Boolean, uri: Uri?) {
++                            lyricView.setEnabled(
++                                Settings.Secure.getIntForUser(
++                                    context.contentResolver,
++                                    Settings.Secure.STATUS_BAR_SHOW_LYRIC,
++                                    0,
++                                    UserHandle.USER_CURRENT,
++                                ) != 0
++                            )
++                        }
++                    }
++                context.contentResolver.registerContentObserver(
++                    lyricEnabledUri,
++                    false,
++                    lyricContentObserver,
++                    UserHandle.USER_ALL,
++                )
++                lyricContentObserver.onChange(false, lyricEnabledUri)
++                val job = coroutineContext[Job]
++                job?.invokeOnCompletion {
++                    runCatching {
++                        context.contentResolver.unregisterContentObserver(lyricContentObserver)
+                     }
+                 }
+ 
+diff --git a/packages/SystemUI/src/com/android/systemui/util/LyricTextView.kt b/packages/SystemUI/src/com/android/systemui/util/LyricTextView.kt
+new file mode 100644
+index 000000000000..13a1686784f7
+--- /dev/null
++++ b/packages/SystemUI/src/com/android/systemui/util/LyricTextView.kt
+@@ -0,0 +1,134 @@
++/*
++ * Copyright (C) 2020 The exTHmUI Open Source Project
++ *               2022 Project Kaleidoscope
++ *               2025-2026 RisingOS (revived) Android Project
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ *      http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++
++package com.android.systemui.util
++
++import android.content.Context
++import android.graphics.Canvas
++import android.graphics.Paint
++import android.icu.text.Bidi
++import android.util.AttributeSet
++import android.view.View
++import android.widget.TextView
++import kotlin.math.abs
++import kotlin.math.max
++
++class LyricTextView @JvmOverloads constructor(
++    context: Context,
++    attrs: AttributeSet? = null,
++    defStyleAttr: Int = 0,
++    defStyleRes: Int = 0,
++) : TextView(context, attrs, defStyleAttr, defStyleRes) {
++
++    private var stopped = true
++    private var textWidth = 0
++    private var scrollSpeed = 4
++    private var offset = 0
++    private var text: String? = null
++    private var textRtl = false
++
++    private val startScrollRunnable = Runnable { startScroll() }
++    private val invalidateRunnable = Runnable { invalidate() }
++
++    override fun onDetachedFromWindow() {
++        removeCallbacks(startScrollRunnable)
++        super.onDetachedFromWindow()
++    }
++
++    override fun onTextChanged(text: CharSequence?, start: Int, lengthBefore: Int, lengthAfter: Int) {
++        super.onTextChanged(text, start, lengthBefore, lengthAfter)
++        stopScroll()
++        if (text != null) {
++            this.text = text.toString()
++            textRtl = Bidi.getBaseDirection(this.text) == Bidi.RTL
++            if (textRtl) {
++                paint.textAlign = Paint.Align.RIGHT
++                offset = -1
++            } else {
++                paint.textAlign = Paint.Align.LEFT
++                offset = if (View.LAYOUT_DIRECTION_RTL == layoutDirection) -1 else 0
++            }
++            textWidth = paint.measureText(this.text).toInt()
++            postInvalidate()
++            postDelayed(startScrollRunnable, START_SCROLL_DELAY.toLong())
++        } else {
++            this.text = null
++        }
++    }
++
++    override fun setTextColor(color: Int) {
++        paint.color = color
++        postInvalidate()
++    }
++
++    override fun onDraw(canvas: Canvas) {
++        val viewRtl = View.LAYOUT_DIRECTION_RTL == layoutDirection
++        if (textRtl && offset == -1) {
++            offset = width
++        } else if (viewRtl && offset == -1) {
++            offset = max(0, width - textWidth)
++        }
++        if (text != null) {
++            val y = height / 2.0f + abs(paint.ascent() + paint.descent()) / 2
++            canvas.drawText(text!!, offset.toFloat(), y, paint)
++        }
++        if (!stopped) {
++            if (!textRtl) {
++                if (width - offset + scrollSpeed >= textWidth) {
++                    offset = if (width > textWidth && !viewRtl) 0 else width - textWidth
++                    stopScroll()
++                } else {
++                    offset -= scrollSpeed
++                }
++            } else {
++                if (offset + scrollSpeed >= textWidth) {
++                    offset = max(width, textWidth)
++                    stopScroll()
++                } else {
++                    offset += scrollSpeed
++                }
++            }
++            invalidateAfter(INVALIDATE_DELAY.toLong())
++        }
++    }
++
++    private fun invalidateAfter(delay: Long) {
++        removeCallbacks(invalidateRunnable)
++        postDelayed(invalidateRunnable, delay)
++    }
++
++    fun startScroll() {
++        stopped = false
++        postInvalidate()
++    }
++
++    fun stopScroll() {
++        stopped = true
++        removeCallbacks(startScrollRunnable)
++        postInvalidate()
++    }
++
++    fun setScrollSpeed(scrollSpeed: Int) {
++        this.scrollSpeed = scrollSpeed
++    }
++
++    companion object {
++        private const val START_SCROLL_DELAY = 500
++        private const val INVALIDATE_DELAY = 10
++    }
++}
+-- 
+2.56.1
+
