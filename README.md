@@ -5,7 +5,7 @@ Meizu Flyme-style status bar lyric (ticker mode + LRCLIB fallback) for **PixelOS
 ## What you get
 
 - Status bar lyric rendered from music apps' Flyme ticker notifications
-- Automatic device-props disguise for 8 music apps (NetEase Cloud Music, QQ Music, KuGou, Kuwo, Migu, Honor Music...) so they publish ticker lyric notifications out of the box (prop: `persist.sys.disguise_props_for_music_app`, default `true`)
+- Automatic device-props disguise for 8 music apps (NetEase Cloud Music, QQ Music, KuGou, Kuwo, Migu, Honor Music...) so they publish ticker lyric notifications out of the box (prop: `persist.sys.disguise_props_for_music_app`, default `true`, toggleable in Settings)
 - LRCLIB lyrics fetching as fallback (works without app cooperation)
 - Toggle in **Settings > Display > Other display controls > Status bar lyric**
 
@@ -25,6 +25,7 @@ Meizu Flyme-style status bar lyric (ticker mode + LRCLIB fallback) for **PixelOS
 | Patch | Description | Original commit |
 |---|---|---|
 | `0001` | Add status bar lyric toggle to display settings | Evolution-X (Evolver) `2d2e69a788b5` |
+| `0002` | Add disguise device for music apps toggle (below the lyric switch, backed by `persist.sys.disguise_props_for_music_app`, ported from PixelExperience) | PixelExperience `91fdc755` lineage |
 
 ## Why 0004 is required on Android 17
 
@@ -52,6 +53,6 @@ bash apply.sh
 | [Ghosuto](https://github.com/Ghosuto) | LyricsFetcher for LRCLIB synced/plain lyrics, app icon removal (`d21f19e7e3ca`, `743453ac7a16`) |
 | [joshuah345](https://github.com/joshuah345) (hiroshi.) | Lazy LyricsFetcher callback registration (`38d04ec71e4b`) |
 | [KujouYuko](https://github.com/KujouYuko) | Evolver toggle (`2d2e69a788b5`) |
-| [linlinger](https://github.com/linlinger) | PixelOS port & adaptation, hidden-API exposure fix (`0004`), Settings toggle port |
+| [linlinger](https://github.com/linlinger) | PixelOS port & adaptation, hidden-API exposure fix (`0004`), Settings toggle ports (`Settings 0001`/`0002`) |
 
 All patches are extracted/integrated for PixelOS; the underlying feature is the work of the Evolution-X team and the authors listed above.

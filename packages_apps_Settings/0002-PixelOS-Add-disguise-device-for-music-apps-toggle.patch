@@ -1,0 +1,171 @@
+From 5f1462c43c65cab7c32a28e11b55a7201ba3be0e Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?=E6=9E=97=E5=87=8C=E5=84=BF?=
+ <32541118+linlinger@users.noreply.github.com>
+Date: Thu, 19 Nov 2026 23:51:36 +0800
+Subject: [PATCH] PixelOS: Add disguise device for music apps toggle
+
+Adds a switch below the status bar lyric toggle in Display settings,
+backed by persist.sys.disguise_props_for_music_app (read by
+MeizuPropsUtils at Application instantiation). Disabled while the
+status bar lyric switch is off. Music apps must be restarted after
+toggling. Ported from PixelExperience.
+
+Change-Id: I7449514c7dd8015d925a794a6babf40836203d4d
+---
+ res/values-zh-rCN/custom_strings.xml          | 15 ++++
+ res/values/custom_strings.xml                 |  2 +
+ res/xml/display_settings.xml                  |  6 ++
+ src/com/android/settings/DisplaySettings.java |  2 +
+ ...sBarLyricDisguisePreferenceController.java | 70 +++++++++++++++++++
+ 5 files changed, 95 insertions(+)
+ create mode 100644 res/values-zh-rCN/custom_strings.xml
+ create mode 100644 src/com/android/settings/display/StatusBarLyricDisguisePreferenceController.java
+
+diff --git a/res/values-zh-rCN/custom_strings.xml b/res/values-zh-rCN/custom_strings.xml
+new file mode 100644
+index 00000000000..734472458c9
+--- /dev/null
++++ b/res/values-zh-rCN/custom_strings.xml
+@@ -0,0 +1,15 @@
++<?xml version="1.0" encoding="utf-8"?>
++<!--
++    SPDX-License-Identifier: Apache-2.0
++    Copyright (C) 2026 The PixelOS Project
++
++    Chinese (Simplified) translations for custom PixelOS Settings strings.
++-->
++<resources xmlns:xliff="urn:oasis:names:tc:xliff:document:1.1">
++
++    <!-- Status bar lyric -->
++    <string name="status_bar_lyric_title">状态栏歌词</string>
++    <string name="status_bar_lyric_summary">在状态栏中显示音乐歌词（需要应用支持）</string>
++    <string name="disguise_props_for_music_app_title">对音乐应用伪装设备</string>
++    <string name="disguise_props_for_music_app_summary">在一些音乐应用中伪装设备以支持状态栏歌词。更改此开关后，您必须重新启动相关应用才能使更改生效。</string>
++</resources>
+diff --git a/res/values/custom_strings.xml b/res/values/custom_strings.xml
+index 6b0b84d577c..4229c3a9565 100644
+--- a/res/values/custom_strings.xml
++++ b/res/values/custom_strings.xml
+@@ -496,4 +496,6 @@
+     <!-- Status bar lyric -->
+     <string name="status_bar_lyric_title">Status bar lyrics</string>
+     <string name="status_bar_lyric_summary">Show music lyrics in the status bar (requires a supporting music app)</string>
++    <string name="disguise_props_for_music_app_title">Disguise device for music apps</string>
++    <string name="disguise_props_for_music_app_summary">Disguise the device in some music applications to support the status bar lyric. After changing this toggle, you have to restart the applications for the change to take effect.</string>
+ </resources>
+diff --git a/res/xml/display_settings.xml b/res/xml/display_settings.xml
+index 8972bf76b5e..93d7ecb82b6 100644
+--- a/res/xml/display_settings.xml
++++ b/res/xml/display_settings.xml
+@@ -174,6 +174,12 @@
+             android:title="@string/status_bar_lyric_title"
+             android:summary="@string/status_bar_lyric_summary"/>
+ 
++        <SwitchPreference
++            android:key="status_bar_disguise_props_for_music_app"
++            android:title="@string/disguise_props_for_music_app_title"
++            android:summary="@string/disguise_props_for_music_app_summary"
++            android:dependency="status_bar_show_lyric"/>
++
+         <!--
+             Auto-rotation preference that will be shown when device state based auto-rotation
+             settings are available.
+diff --git a/src/com/android/settings/DisplaySettings.java b/src/com/android/settings/DisplaySettings.java
+index ffb5473dd70..4a0c03023c2 100644
+--- a/src/com/android/settings/DisplaySettings.java
++++ b/src/com/android/settings/DisplaySettings.java
+@@ -31,6 +31,7 @@ import com.android.settings.display.DisplayScreen;
+ import com.android.settings.display.ExternalDisplayPreferenceController;
+ import com.android.settings.display.LiftToWakePreferenceController;
+ import com.android.settings.display.ShowOperatorNamePreferenceController;
++import com.android.settings.display.StatusBarLyricDisguisePreferenceController;
+ import com.android.settings.display.StatusBarLyricPreferenceController;
+ import com.android.settings.display.TapToWakePreferenceController;
+ import com.android.settings.display.ThemePreferenceController;
+@@ -96,6 +97,7 @@ public class DisplaySettings extends DashboardFragment {
+         controllers.add(new VrDisplayPreferenceController(context));
+         controllers.add(new ShowOperatorNamePreferenceController(context));
+         controllers.add(new StatusBarLyricPreferenceController(context));
++        controllers.add(new StatusBarLyricDisguisePreferenceController(context));
+         controllers.add(new ThemePreferenceController(context));
+         controllers.add(new BrightnessLevelPreferenceController(context, lifecycle));
+ 
+diff --git a/src/com/android/settings/display/StatusBarLyricDisguisePreferenceController.java b/src/com/android/settings/display/StatusBarLyricDisguisePreferenceController.java
+new file mode 100644
+index 00000000000..9b1cf84bf9a
+--- /dev/null
++++ b/src/com/android/settings/display/StatusBarLyricDisguisePreferenceController.java
+@@ -0,0 +1,70 @@
++/*
++ * Copyright (C) 2026 The PixelOS Project
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ *      http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++package com.android.settings.display;
++
++import android.content.Context;
++import android.os.SystemProperties;
++
++import androidx.preference.Preference;
++import androidx.preference.TwoStatePreference;
++
++import com.android.settings.core.BasePreferenceController;
++import com.android.settings.core.PreferenceControllerMixin;
++
++/**
++ * A controller to manage the switch that disguises the device as a Meizu
++ * (Flyme) device for music apps, so they publish the ticker notifications
++ * required by the status bar lyric feature.
++ *
++ * Backed by the system property
++ * {@code persist.sys.disguise_props_for_music_app}, consumed by
++ * MeizuPropsUtils at application instantiation time. The default matches
++ * the framework default ({@code true}); music apps must be restarted
++ * after toggling for the change to take effect.
++ */
++public class StatusBarLyricDisguisePreferenceController extends BasePreferenceController
++        implements PreferenceControllerMixin, Preference.OnPreferenceChangeListener {
++
++    private static final String PROP_DISGUISE_PROPS_FOR_MUSIC_APP =
++            "persist.sys.disguise_props_for_music_app";
++
++    public StatusBarLyricDisguisePreferenceController(Context context, String preferenceKey) {
++        super(context, preferenceKey);
++    }
++
++    public StatusBarLyricDisguisePreferenceController(Context context) {
++        super(context, "status_bar_disguise_props_for_music_app");
++    }
++
++    @Override
++    public int getAvailabilityStatus() {
++        return AVAILABLE;
++    }
++
++    @Override
++    public void updateState(Preference preference) {
++        boolean enabled = SystemProperties.getBoolean(
++                PROP_DISGUISE_PROPS_FOR_MUSIC_APP, true /* def */);
++        ((TwoStatePreference) preference).setChecked(enabled);
++    }
++
++    @Override
++    public boolean onPreferenceChange(Preference preference, Object newValue) {
++        boolean enabled = (Boolean) newValue;
++        SystemProperties.set(PROP_DISGUISE_PROPS_FOR_MUSIC_APP, enabled ? "true" : "false");
++        return true;
++    }
++}
+-- 
+2.56.1
+
