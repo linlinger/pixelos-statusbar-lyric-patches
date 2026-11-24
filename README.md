@@ -7,6 +7,7 @@ Meizu Flyme-style status bar lyric (ticker mode + LRCLIB fallback) for **PixelOS
 - Status bar lyric rendered from music apps' Flyme ticker notifications
 - Automatic device-props disguise for 8 music apps (NetEase Cloud Music, QQ Music, KuGou, Kuwo, Migu, Honor Music...) so they publish ticker lyric notifications out of the box (prop: `persist.sys.disguise_props_for_music_app`, default `true`, toggleable in Settings)
 - LRCLIB lyrics fetching as fallback (works without app cooperation)
+- Simplified/Traditional Chinese lyric conversion: follow original / always Simplified / always Traditional (OpenCC-style dictionary-driven, word-level longest match)
 - Toggle in **Settings > Display > Other display controls > Status bar lyric**
 
 ## Patches
@@ -19,6 +20,7 @@ Meizu Flyme-style status bar lyric (ticker mode + LRCLIB fallback) for **PixelOS
 | `0002` | Follow-ups: LyricsFetcher (LRCLIB), remove broken app icon, lazy register | Evolution-X `d21f19e7e3ca`, `743453ac7a16`, `38d04ec71e4b` |
 | `0003` | Disguise props for music apps (MeizuPropsUtils) | Evolution-X `20ba25ae0038` |
 | `0004` | Expose ticker flags as public API | PixelOS-specific, required on A17 (see below) |
+| `0005` | Simplified/Traditional lyric text conversion (LyricTextConverter + bundled OpenCC dictionaries) | PixelOS-specific |
 
 ### packages/apps/Settings
 
@@ -26,6 +28,7 @@ Meizu Flyme-style status bar lyric (ticker mode + LRCLIB fallback) for **PixelOS
 |---|---|---|
 | `0001` | Add status bar lyric toggle to display settings | Evolution-X (Evolver) `2d2e69a788b5` |
 | `0002` | Add disguise device for music apps toggle (below the lyric switch, backed by `persist.sys.disguise_props_for_music_app`, ported from PixelExperience) | PixelExperience `91fdc755` lineage |
+| `0003` | Add lyric text conversion option (dropdown below the lyric switch, backed by `status_bar_lyric_text_conversion`) | PixelOS-specific |
 
 ## Why 0004 is required on Android 17
 
@@ -45,6 +48,11 @@ bash apply.sh
 
 `apply.sh` uses `git am -3` first and falls back to `git apply --reject` on conflicts. Patch authorship (the `From:` header of each patch) is preserved from the original Evolution-X commits, so `git am` keeps proper attribution.
 
+## Licenses
+
+- The patches are Apache-2.0, like the AOSP/LineageOS code they modify.
+- `frameworks_base 0005` bundles the [OpenCC](https://github.com/BYVoid/OpenCC) dictionaries (STCharacters, STPhrases, TSCharacters, TSPhrases) in SystemUI `res/raw`. OpenCC data is **Apache-2.0**; the full license text ships alongside the dictionaries (`opencc_license.txt`) and each dictionary file retains its original attribution header.
+
 ## Credits
 
 | Author | Contribution |
@@ -53,6 +61,6 @@ bash apply.sh
 | [Ghosuto](https://github.com/Ghosuto) | LyricsFetcher for LRCLIB synced/plain lyrics, app icon removal (`d21f19e7e3ca`, `743453ac7a16`) |
 | [joshuah345](https://github.com/joshuah345) (hiroshi.) | Lazy LyricsFetcher callback registration (`38d04ec71e4b`) |
 | [KujouYuko](https://github.com/KujouYuko) | Evolver toggle (`2d2e69a788b5`) |
-| [linlinger](https://github.com/linlinger) | PixelOS port & adaptation, hidden-API exposure fix (`0004`), Settings toggle ports (`Settings 0001`/`0002`) |
+| [linlinger](https://github.com/linlinger) | PixelOS port & adaptation, hidden-API exposure fix (`0004`), Simplified/Traditional conversion (`0005`, `Settings 0003`), Settings toggle ports (`Settings 0001`/`0002`) |
 
 All patches are extracted/integrated for PixelOS; the underlying feature is the work of the Evolution-X team and the authors listed above.

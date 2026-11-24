@@ -1,0 +1,183 @@
+From 582e16359abdfb669418bcac45536d2f9506fc2a Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?=E6=9E=97=E5=87=8C=E5=84=BF?=
+ <32541118+linlinger@users.noreply.github.com>
+Date: Tue, 24 Nov 2026 22:58:00 +0800
+Subject: [PATCH] PixelOS: Add status bar lyric text conversion option
+
+Adds a dropdown below the status bar lyric toggle in Display settings
+to convert lyrics between Simplified and Traditional Chinese
+(follow original / always Simplified / always Traditional), backed by
+Settings.Secure.STATUS_BAR_LYRIC_TEXT_CONVERSION. Includes zh-rCN
+translations. SystemUI observes the setting live and the mode takes
+effect from the next lyric line.
+
+Change-Id: I69a2cd65c869c5647e9976feb3c143a860e758ee
+---
+ res/values-zh-rCN/custom_strings.xml          |  6 ++
+ res/values/custom_strings.xml                 |  7 ++
+ res/xml/display_settings.xml                  |  6 ++
+ src/com/android/settings/DisplaySettings.java |  2 +
+ ...ricTextConversionPreferenceController.java | 83 +++++++++++++++++++
+ 5 files changed, 104 insertions(+)
+ create mode 100644 src/com/android/settings/display/StatusBarLyricTextConversionPreferenceController.java
+
+diff --git a/res/values-zh-rCN/custom_strings.xml b/res/values-zh-rCN/custom_strings.xml
+index 734472458c9..5f284c879e2 100644
+--- a/res/values-zh-rCN/custom_strings.xml
++++ b/res/values-zh-rCN/custom_strings.xml
+@@ -12,4 +12,10 @@
+     <string name="status_bar_lyric_summary">在状态栏中显示音乐歌词（需要应用支持）</string>
+     <string name="disguise_props_for_music_app_title">对音乐应用伪装设备</string>
+     <string name="disguise_props_for_music_app_summary">在一些音乐应用中伪装设备以支持状态栏歌词。更改此开关后，您必须重新启动相关应用才能使更改生效。</string>
++
++    <string name="status_bar_lyric_text_conversion_title">歌词文本转换</string>
++    <string name="status_bar_lyric_text_conversion_summary">在简体中文和繁体中文之间转换歌词</string>
++    <string name="status_bar_lyric_text_conversion_follow">跟随原歌词</string>
++    <string name="status_bar_lyric_text_conversion_simplified">一律简体中文</string>
++    <string name="status_bar_lyric_text_conversion_traditional">一律繁体中文</string>
+ </resources>
+diff --git a/res/values/custom_strings.xml b/res/values/custom_strings.xml
+index 4229c3a9565..f56e07506be 100644
+--- a/res/values/custom_strings.xml
++++ b/res/values/custom_strings.xml
+@@ -498,4 +498,11 @@
+     <string name="status_bar_lyric_summary">Show music lyrics in the status bar (requires a supporting music app)</string>
+     <string name="disguise_props_for_music_app_title">Disguise device for music apps</string>
+     <string name="disguise_props_for_music_app_summary">Disguise the device in some music applications to support the status bar lyric. After changing this toggle, you have to restart the applications for the change to take effect.</string>
++
++    <!-- Status bar lyric text conversion -->
++    <string name="status_bar_lyric_text_conversion_title">Lyric text conversion</string>
++    <string name="status_bar_lyric_text_conversion_summary">Convert lyrics between Simplified and Traditional Chinese</string>
++    <string name="status_bar_lyric_text_conversion_follow">Follow original lyrics</string>
++    <string name="status_bar_lyric_text_conversion_simplified">Always Simplified Chinese</string>
++    <string name="status_bar_lyric_text_conversion_traditional">Always Traditional Chinese</string>
+ </resources>
+diff --git a/res/xml/display_settings.xml b/res/xml/display_settings.xml
+index 93d7ecb82b6..6653938b47a 100644
+--- a/res/xml/display_settings.xml
++++ b/res/xml/display_settings.xml
+@@ -174,6 +174,12 @@
+             android:title="@string/status_bar_lyric_title"
+             android:summary="@string/status_bar_lyric_summary"/>
+ 
++        <ListPreference
++            android:key="status_bar_lyric_text_conversion"
++            android:title="@string/status_bar_lyric_text_conversion_title"
++            android:summary="@string/status_bar_lyric_text_conversion_summary"
++            android:dependency="status_bar_show_lyric"/>
++
+         <SwitchPreference
+             android:key="status_bar_disguise_props_for_music_app"
+             android:title="@string/disguise_props_for_music_app_title"
+diff --git a/src/com/android/settings/DisplaySettings.java b/src/com/android/settings/DisplaySettings.java
+index 4a0c03023c2..2827d15343f 100644
+--- a/src/com/android/settings/DisplaySettings.java
++++ b/src/com/android/settings/DisplaySettings.java
+@@ -33,6 +33,7 @@ import com.android.settings.display.LiftToWakePreferenceController;
+ import com.android.settings.display.ShowOperatorNamePreferenceController;
+ import com.android.settings.display.StatusBarLyricDisguisePreferenceController;
+ import com.android.settings.display.StatusBarLyricPreferenceController;
++import com.android.settings.display.StatusBarLyricTextConversionPreferenceController;
+ import com.android.settings.display.TapToWakePreferenceController;
+ import com.android.settings.display.ThemePreferenceController;
+ import com.android.settings.display.VrDisplayPreferenceController;
+@@ -97,6 +98,7 @@ public class DisplaySettings extends DashboardFragment {
+         controllers.add(new VrDisplayPreferenceController(context));
+         controllers.add(new ShowOperatorNamePreferenceController(context));
+         controllers.add(new StatusBarLyricPreferenceController(context));
++        controllers.add(new StatusBarLyricTextConversionPreferenceController(context));
+         controllers.add(new StatusBarLyricDisguisePreferenceController(context));
+         controllers.add(new ThemePreferenceController(context));
+         controllers.add(new BrightnessLevelPreferenceController(context, lifecycle));
+diff --git a/src/com/android/settings/display/StatusBarLyricTextConversionPreferenceController.java b/src/com/android/settings/display/StatusBarLyricTextConversionPreferenceController.java
+new file mode 100644
+index 00000000000..9bd8460a7e1
+--- /dev/null
++++ b/src/com/android/settings/display/StatusBarLyricTextConversionPreferenceController.java
+@@ -0,0 +1,83 @@
++/*
++ * Copyright (C) 2026 The PixelOS Project
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ *      http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++package com.android.settings.display;
++
++import android.content.Context;
++import android.provider.Settings;
++
++import androidx.preference.ListPreference;
++import androidx.preference.Preference;
++import androidx.preference.PreferenceScreen;
++
++import com.android.settings.R;
++import com.android.settings.core.BasePreferenceController;
++import com.android.settings.core.PreferenceControllerMixin;
++
++/**
++ * A controller to manage the Simplified/Traditional Chinese conversion mode
++ * for status bar lyrics, backed by
++ * {@link Settings.Secure#STATUS_BAR_LYRIC_TEXT_CONVERSION}.
++ *
++ * 0 = follow the original lyrics (default), 1 = always convert to
++ * Simplified, 2 = always convert to Traditional. The SystemUI side observes
++ * this setting live; the mode takes effect from the next lyric line.
++ */
++public class StatusBarLyricTextConversionPreferenceController extends BasePreferenceController
++        implements PreferenceControllerMixin, Preference.OnPreferenceChangeListener {
++
++    public StatusBarLyricTextConversionPreferenceController(Context context,
++            String preferenceKey) {
++        super(context, preferenceKey);
++    }
++
++    public StatusBarLyricTextConversionPreferenceController(Context context) {
++        super(context, Settings.Secure.STATUS_BAR_LYRIC_TEXT_CONVERSION);
++    }
++
++    @Override
++    public int getAvailabilityStatus() {
++        return AVAILABLE;
++    }
++
++    @Override
++    public void displayPreference(PreferenceScreen screen) {
++        super.displayPreference(screen);
++
++        final ListPreference preference = screen.findPreference(getPreferenceKey());
++        if (preference != null) {
++            preference.setEntries(new CharSequence[]{
++                    mContext.getString(R.string.status_bar_lyric_text_conversion_follow),
++                    mContext.getString(R.string.status_bar_lyric_text_conversion_simplified),
++                    mContext.getString(R.string.status_bar_lyric_text_conversion_traditional)});
++            preference.setEntryValues(new CharSequence[]{"0", "1", "2"});
++        }
++    }
++
++    @Override
++    public void updateState(Preference preference) {
++        final int mode = Settings.Secure.getInt(mContext.getContentResolver(),
++                Settings.Secure.STATUS_BAR_LYRIC_TEXT_CONVERSION, 0 /* def */);
++        ((ListPreference) preference).setValue(String.valueOf(mode));
++    }
++
++    @Override
++    public boolean onPreferenceChange(Preference preference, Object newValue) {
++        Settings.Secure.putInt(mContext.getContentResolver(),
++                Settings.Secure.STATUS_BAR_LYRIC_TEXT_CONVERSION,
++                Integer.parseInt((String) newValue));
++        return true;
++    }
++}
+-- 
+2.56.1
+
