@@ -1,4 +1,4 @@
-From 707adfa8be6b3783a553d450a86876528586125e Mon Sep 17 00:00:00 2001
+From 26146f44f4cee3f5588807bd217ba609773e0648 Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?=E6=9E=97=E5=87=8C=E5=84=BF?=
  <32541118+linlinger@users.noreply.github.com>
 Date: Tue, 24 Nov 2026 22:55:53 +0800
@@ -25,6 +25,7 @@ in Traditional Chinese regardless of what the music app provides.
 Change-Id: I709ea3287f1ae01afff534eb3f25ba628021cecb
 ---
  core/java/android/provider/Settings.java      |    10 +
+ packages/SystemUI/res/raw/keep_opencc.xml     |    23 +
  packages/SystemUI/res/raw/opencc_license.txt  |    56 +
  .../SystemUI/res/raw/opencc_st_characters.txt |  4029 ++
  .../SystemUI/res/raw/opencc_st_phrases.txt    | 49309 ++++++++++++++++
@@ -33,7 +34,8 @@ Change-Id: I709ea3287f1ae01afff534eb3f25ba628021cecb
  .../statusbar/phone/LyricControllerModern.kt  |    23 +
  .../statusbar/phone/LyricViewController.kt    |    33 +-
  .../systemui/util/LyricTextConverter.kt       |   174 +
- 9 files changed, 59197 insertions(+), 4 deletions(-)
+ 10 files changed, 59220 insertions(+), 4 deletions(-)
+ create mode 100644 packages/SystemUI/res/raw/keep_opencc.xml
  create mode 100644 packages/SystemUI/res/raw/opencc_license.txt
  create mode 100644 packages/SystemUI/res/raw/opencc_st_characters.txt
  create mode 100644 packages/SystemUI/res/raw/opencc_st_phrases.txt
@@ -62,6 +64,35 @@ index 59f666eb3185..39ce71fa3cbc 100644
      }
  
      /**
+diff --git a/packages/SystemUI/res/raw/keep_opencc.xml b/packages/SystemUI/res/raw/keep_opencc.xml
+new file mode 100644
+index 000000000000..2d5cad32a13e
+--- /dev/null
++++ b/packages/SystemUI/res/raw/keep_opencc.xml
+@@ -0,0 +1,23 @@
++<?xml version="1.0" encoding="UTF-8"?>
++<!--
++  ~ Copyright (C) 2026 The PixelOS Project
++  ~
++  ~ Licensed under the Apache License, Version 2.0 (the "License");
++  ~ you may not use this file except in compliance with the License.
++  ~ You may obtain a copy of the License at
++  ~
++  ~      http://www.apache.org/licenses/LICENSE-2.0
++  ~
++  ~ Unless required by applicable law or agreed to in writing, software
++  ~ distributed under the License is distributed on an "AS IS" BASIS,
++  ~ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++  ~ See the License for the specific language governing permissions and
++  ~ limitations under the License.
++  -->
++
++<!-- Keeps the bundled OpenCC dictionaries from being removed by the
++     resource shrinker: they are loaded at runtime via
++     Resources.openRawResource() in LyricTextConverter, which the
++     shrinker cannot statically trace. -->
++<resources xmlns:tools="http://schemas.android.com/tools"
++    tools:keep="@raw/opencc_st_characters,@raw/opencc_st_phrases,@raw/opencc_ts_characters,@raw/opencc_ts_phrases,@raw/opencc_license" />
 diff --git a/packages/SystemUI/res/raw/opencc_license.txt b/packages/SystemUI/res/raw/opencc_license.txt
 new file mode 100644
 index 000000000000..9f7a310eb2b1
