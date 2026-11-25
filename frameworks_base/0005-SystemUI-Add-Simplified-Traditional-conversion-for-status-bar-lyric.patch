@@ -1,4 +1,4 @@
-From 26146f44f4cee3f5588807bd217ba609773e0648 Mon Sep 17 00:00:00 2001
+From 1a59f4a77cff8758e5c343a0f657823ae2ea50b5 Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?=E6=9E=97=E5=87=8C=E5=84=BF?=
  <32541118+linlinger@users.noreply.github.com>
 Date: Tue, 24 Nov 2026 22:55:53 +0800
@@ -33,8 +33,8 @@ Change-Id: I709ea3287f1ae01afff534eb3f25ba628021cecb
  .../SystemUI/res/raw/opencc_ts_phrases.txt    |   505 +
  .../statusbar/phone/LyricControllerModern.kt  |    23 +
  .../statusbar/phone/LyricViewController.kt    |    33 +-
- .../systemui/util/LyricTextConverter.kt       |   174 +
- 10 files changed, 59220 insertions(+), 4 deletions(-)
+ .../systemui/util/LyricTextConverter.kt       |   175 +
+ 10 files changed, 59221 insertions(+), 4 deletions(-)
  create mode 100644 packages/SystemUI/res/raw/keep_opencc.xml
  create mode 100644 packages/SystemUI/res/raw/opencc_license.txt
  create mode 100644 packages/SystemUI/res/raw/opencc_st_characters.txt
@@ -59227,10 +59227,10 @@ index ad988eea8bda..ceeb4d9c034e 100644
  
 diff --git a/packages/SystemUI/src/com/android/systemui/util/LyricTextConverter.kt b/packages/SystemUI/src/com/android/systemui/util/LyricTextConverter.kt
 new file mode 100644
-index 000000000000..6b369d879021
+index 000000000000..c2caddf5fa4b
 --- /dev/null
 +++ b/packages/SystemUI/src/com/android/systemui/util/LyricTextConverter.kt
-@@ -0,0 +1,174 @@
+@@ -0,0 +1,175 @@
 +/*
 + * SPDX-FileCopyrightText: 2026 linlinger
 + * SPDX-License-Identifier: Apache-2.0
@@ -59247,7 +59247,6 @@ index 000000000000..6b369d879021
 +import android.util.Log
 +import com.android.systemui.res.R
 +import java.util.concurrent.Executors
-+import java.util.concurrent.atomic.AtomicBoolean
 +
 +/**
 + * Converts lyric text between Simplified and Traditional Chinese.
@@ -59284,17 +59283,19 @@ index 000000000000..6b369d879021
 +    @Volatile
 +    private var s2tChar: HashMap<String, String>? = null
 +
++    @Volatile
 +    private var t2sMaxLength = 0
++
++    @Volatile
 +    private var s2tMaxLength = 0
 +
-+    private val preloadStarted = AtomicBoolean(false)
 +    private val executor = Executors.newSingleThreadExecutor { r ->
 +        Thread(r, "LyricTextConverter-preload").apply { isDaemon = true }
 +    }
 +
 +    /** Kick off background dictionary loading for the given mode (no-op if loaded). */
 +    fun preload(context: Context, mode: Int) {
-+        if (mode == MODE_FOLLOW || !preloadStarted.compareAndSet(false, true)) {
++        if (mode == MODE_FOLLOW) {
 +            return
 +        }
 +        executor.execute { ensureLoaded(context.applicationContext, mode) }
